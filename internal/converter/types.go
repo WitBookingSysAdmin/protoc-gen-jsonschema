@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/alecthomas/jsonschema"
+	"github.com/envoyproxy/protoc-gen-validate/validate"
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/protoc-gen-go/descriptor"
 	"github.com/xeipuuv/gojsonschema"
@@ -62,6 +63,16 @@ componentLoop:
 
 // Convert a proto "field" (essentially a type-switch with some recursion):
 func (c *Converter) convertField(curPkg *ProtoPackage, desc *descriptor.FieldDescriptorProto, msg *descriptor.DescriptorProto) (*jsonschema.Type, error) {
+	var validationRules *validate.FieldRules = nil
+	if desc.Options != nil {
+		if ext, err := proto.GetExtension(desc.Options, validate.E_Rules); err == proto.ErrMissingExtension {
+
+		} else if err != nil {
+			return nil, err
+		} else if rule, ok := ext.(*validate.FieldRules); ok {
+			validationRules = rule
+		}
+	}
 
 	// Prepare a new jsonschema.Type for our eventual return value:
 	jsonSchemaType := &jsonschema.Type{
@@ -122,6 +133,81 @@ func (c *Converter) convertField(curPkg *ProtoPackage, desc *descriptor.FieldDes
 			}
 		} else {
 			jsonSchemaType.Type = gojsonschema.TYPE_STRING
+			if stringRules := validationRules.GetString_(); stringRules != nil {
+				if min := stringRules.GetMinLen(); min != 0 {
+					jsonSchemaType.MinLength = int(min)
+				}
+				if max := stringRules.GetMaxLen(); max != 0 {
+					jsonSchemaType.MaxLength = int(max)
+				}
+				if len := stringRules.GetLen(); len > 0 {
+					jsonSchemaType.MinLength = int(len)
+					jsonSchemaType.MaxLength = int(len)
+				}
+				if pattern := stringRules.GetPattern(); pattern != "" {
+					jsonSchemaType.Pattern = pattern
+				}
+				//Prefix and suffix implemented via regexp.
+				//This means that you can't use prefix, suffix and regexp at the same time.
+				if prefix := stringRules.GetPrefix(); prefix != "" {
+					jsonSchemaType.Pattern = fmt.Sprintf("^%s.*", prefix)
+				}
+				if suffix := stringRules.GetSuffix(); suffix != "" {
+					jsonSchemaType.Pattern = fmt.Sprintf(".*%s$", suffix)
+				}
+				if in := stringRules.GetIn(); in != nil {
+					values := make([]interface{}, len(in))
+					for i := range in {
+						values[i] = in[i]
+					}
+					jsonSchemaType.Enum = values
+				}
+				if notIn := stringRules.GetNotIn(); notIn != nil {
+					values := make([]interface{}, len(notIn))
+					for i := range notIn {
+						values[i] = notIn[i]
+					}
+					jsonSchemaType.Not = &jsonschema.Type{
+						Enum: values,
+					}
+				}
+				if email := stringRules.GetEmail(); email {
+					jsonSchemaType.Format = "email"
+				}
+				if address := stringRules.GetAddress(); address {
+					jsonSchemaType.Type = ""
+					jsonSchemaType.OneOf = []*jsonschema.Type{
+						&jsonschema.Type{Type: gojsonschema.TYPE_STRING, Format: "ipv4"},
+						&jsonschema.Type{Type: gojsonschema.TYPE_STRING, Format: "ipv6"},
+						&jsonschema.Type{Type: gojsonschema.TYPE_STRING, Format: "hostname"},
+					}
+				}
+				if hostname := stringRules.GetHostname(); hostname {
+					jsonSchemaType.Format = "hostname"
+				}
+				if ip := stringRules.GetIp(); ip {
+					jsonSchemaType.Type = ""
+					jsonSchemaType.OneOf = []*jsonschema.Type{
+						&jsonschema.Type{Type: gojsonschema.TYPE_STRING, Format: "ipv4"},
+						&jsonschema.Type{Type: gojsonschema.TYPE_STRING, Format: "ipv6"},
+					}
+				}
+				if ipv4 := stringRules.GetIpv4(); ipv4 {
+					jsonSchemaType.Format = "ipv4"
+				}
+				if ipv6 := stringRules.GetIpv6(); ipv6 {
+					jsonSchemaType.Format = "ipv6"
+				}
+				if uri := stringRules.GetUri(); uri {
+					jsonSchemaType.Format = "uri"
+				}
+				if uriRef := stringRules.GetUriRef(); uriRef {
+					jsonSchemaType.Format = "uri-reference"
+				}
+				if uuid := stringRules.GetUuid(); uuid {
+					jsonSchemaType.Format = "uuid"
+				}
+			}
 		}
 
 	case descriptor.FieldDescriptorProto_TYPE_ENUM:

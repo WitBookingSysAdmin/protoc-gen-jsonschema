@@ -1,7 +1,10 @@
 module github.com/chrusty/protoc-gen-jsonschema
 
+go 1.14
+
 require (
 	github.com/alecthomas/jsonschema v0.0.0-20190626084004-00dfc6288dec
+	github.com/envoyproxy/protoc-gen-validate v0.3.0
 	github.com/golang/protobuf v1.3.2
 	github.com/konsorten/go-windows-terminal-sequences v1.0.2 // indirect
 	github.com/kr/pretty v0.1.0 // indirect
