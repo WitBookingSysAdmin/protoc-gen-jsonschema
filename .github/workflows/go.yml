@@ -1,8 +1,9 @@
 name: Build and Release
 
-on:
-  push:
-    branches: [ master ]
+on: release
+# on:
+#   push:
+#     branches: [ master ]
 
 jobs:
 
@@ -26,8 +27,16 @@ jobs:
     - name: Build Darwin
       run: make build_darwin
     
-    - name: Upload artifact
-      uses: actions/upload-artifact@v1.0.0
+    - name: Upload linux to release
+      uses: JasonEtco/upload-to-release@master
       with:
-        name: binaries
-        path: bin
+        args: /bin/protoc-gen-jsonschema-linux-amd64
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Upload darwin to release
+      uses: JasonEtco/upload-to-release@master
+      with:
+        args: /bin/protoc-gen-jsonschema-darwin-amd64
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
