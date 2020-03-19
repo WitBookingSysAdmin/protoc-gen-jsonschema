@@ -9,8 +9,14 @@ install:
 	@GO111MODULE=on go get -u github.com/chrusty/protoc-gen-jsonschema/cmd/protoc-gen-jsonschema && go install github.com/chrusty/protoc-gen-jsonschema/cmd/protoc-gen-jsonschema
 
 build_linux:
-	@echo "Generating Linux-amd64 binary (protoc-gen-jsonschema.linux-amd64) ..."
-	@GOOS=linux GOARCH=amd64 go build -o protoc-gen-jsonschema.linux-amd64
+	@echo "Generating linux amd64 binary (protoc-gen-jsonschema-linux-amd64) ..."
+	@mkdir -p bin
+	@GOOS=linux GOARCH=amd64 go build -o bin/protoc-gen-jsonschema-linux-amd64 cmd/protoc-gen-jsonschema/main.go
+
+build_darwin:
+	@echo "Generating darwin amd64 binary (protoc-gen-jsonschema-linux-amd64) ..."
+	@mkdir -p bin
+	@GOOS=darwin GOARCH=amd64 go build -o bin/protoc-gen-jsonschema-darwin-amd64 cmd/protoc-gen-jsonschema/main.go
 
 PROTO_PATH ?= "internal/converter/testdata/proto"
 samples:
