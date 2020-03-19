@@ -62,16 +62,21 @@ componentLoop:
 }
 
 // Convert a proto "field" (essentially a type-switch with some recursion):
-func (c *Converter) convertField(curPkg *ProtoPackage, desc *descriptor.FieldDescriptorProto, msg *descriptor.DescriptorProto) (*jsonschema.Type, error) {
+func (c *Converter) convertField(curPkg *ProtoPackage, desc *descriptor.FieldDescriptorProto, msg *descriptor.DescriptorProto) (*jsonschema.Type, bool, error) {
 	var validationRules *validate.FieldRules = nil
+	required := false
 	if desc.Options != nil {
 		if ext, err := proto.GetExtension(desc.Options, validate.E_Rules); err == proto.ErrMissingExtension {
 
 		} else if err != nil {
-			return nil, err
+			return nil, required, err
 		} else if rule, ok := ext.(*validate.FieldRules); ok {
 			validationRules = rule
 		}
+	}
+
+	if validationRules != nil && validationRules.Message != nil && validationRules.Message.Required != nil {
+		required = *validationRules.Message.Required
 	}
 
 	// Prepare a new jsonschema.Type for our eventual return value:
@@ -134,6 +139,9 @@ func (c *Converter) convertField(curPkg *ProtoPackage, desc *descriptor.FieldDes
 		} else {
 			jsonSchemaType.Type = gojsonschema.TYPE_STRING
 			if stringRules := validationRules.GetString_(); stringRules != nil {
+				if constValue := stringRules.GetConst(); constValue != "" {
+					jsonSchemaType.Enum = []interface{}{constValue}
+				}
 				if min := stringRules.GetMinLen(); min != 0 {
 					jsonSchemaType.MinLength = int(min)
 				}
@@ -255,7 +263,7 @@ func (c *Converter) convertField(curPkg *ProtoPackage, desc *descriptor.FieldDes
 		}
 
 	default:
-		return nil, fmt.Errorf("unrecognized field type: %s", desc.GetType().String())
+		return nil, required, fmt.Errorf("unrecognized field type: %s", desc.GetType().String())
 	}
 
 	// Recurse array of primitive types:
@@ -281,7 +289,7 @@ func (c *Converter) convertField(curPkg *ProtoPackage, desc *descriptor.FieldDes
 			jsonSchemaType.OneOf = []*jsonschema.Type{}
 		}
 
-		return jsonSchemaType, nil
+		return jsonSchemaType, required, nil
 	}
 
 	// Recurse nested objects / arrays of objects (if necessary):
@@ -289,13 +297,13 @@ func (c *Converter) convertField(curPkg *ProtoPackage, desc *descriptor.FieldDes
 
 		recordType, ok := c.lookupType(curPkg, desc.GetTypeName())
 		if !ok {
-			return nil, fmt.Errorf("no such message type named %s", desc.GetTypeName())
+			return nil, required, fmt.Errorf("no such message type named %s", desc.GetTypeName())
 		}
 
 		// Recurse the recordType:
 		recursedJSONSchemaType, err := c.convertMessageType(curPkg, recordType)
 		if err != nil {
-			return nil, err
+			return nil, required, err
 		}
 
 		// Maps, arrays, and objects are structured in different ways:
@@ -310,13 +318,13 @@ func (c *Converter) convertField(curPkg *ProtoPackage, desc *descriptor.FieldDes
 
 			// Make sure we have a "value":
 			if _, ok := recursedJSONSchemaType.Properties["value"]; !ok {
-				return nil, fmt.Errorf("Unable to find 'value' property of MAP type")
+				return nil, required, fmt.Errorf("Unable to find 'value' property of MAP type")
 			}
 
 			// Marshal the "value" properties to JSON (because that's how we can pass on AdditionalProperties):
 			additionalPropertiesJSON, err := json.Marshal(recursedJSONSchemaType.Properties["value"])
 			if err != nil {
-				return nil, err
+				return nil, required, err
 			}
 			jsonSchemaType.AdditionalProperties = additionalPropertiesJSON
 
@@ -340,7 +348,7 @@ func (c *Converter) convertField(curPkg *ProtoPackage, desc *descriptor.FieldDes
 		}
 	}
 
-	return jsonSchemaType, nil
+	return jsonSchemaType, required, nil
 }
 
 // Converts a proto "MESSAGE" into a JSON-Schema:
@@ -349,7 +357,7 @@ func (c *Converter) convertMessageType(curPkg *ProtoPackage, msg *descriptor.Des
 	// Prepare a new jsonschema:
 	jsonSchemaType := jsonschema.Type{
 		Properties: make(map[string]*jsonschema.Type),
-		Version:    jsonschema.Version,
+		Version:    "http://json-schema.org/draft-07/schema#",
 	}
 	// Generate a description from src comments (if available)
 	if src := c.sourceInfo.GetMessage(msg); src != nil {
@@ -375,15 +383,15 @@ func (c *Converter) convertMessageType(curPkg *ProtoPackage, msg *descriptor.Des
 
 	c.logger.WithField("message_str", proto.MarshalTextString(msg)).Trace("Converting message")
 	for _, fieldDesc := range msg.GetField() {
-		recursedJSONSchemaType, err := c.convertField(curPkg, fieldDesc, msg)
+		recursedJSONSchemaType, required, err := c.convertField(curPkg, fieldDesc, msg)
 		c.logger.WithField("field_name", fieldDesc.GetName()).WithField("type", recursedJSONSchemaType.Type).Debug("Converted field")
 		if err != nil {
 			c.logger.WithError(err).WithField("field_name", fieldDesc.GetName()).WithField("message_name", msg.GetName()).Error("Failed to convert field")
 			return jsonSchemaType, err
 		}
-		jsonSchemaType.Properties[fieldDesc.GetName()] = recursedJSONSchemaType
-		if c.UseProtoAndJSONFieldnames && fieldDesc.GetName() != fieldDesc.GetJsonName() {
-			jsonSchemaType.Properties[fieldDesc.GetJsonName()] = recursedJSONSchemaType
+		jsonSchemaType.Properties[fieldDesc.GetJsonName()] = recursedJSONSchemaType
+		if required {
+			jsonSchemaType.Required = append(jsonSchemaType.Required, fieldDesc.GetJsonName())
 		}
 	}
 	return jsonSchemaType, nil

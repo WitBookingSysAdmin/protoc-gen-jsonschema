@@ -77,7 +77,7 @@ func (c *Converter) convertEnumType(enum *descriptor.EnumDescriptorProto) (jsons
 
 	// Prepare a new jsonschema.Type for our eventual return value:
 	jsonSchemaType := jsonschema.Type{
-		Version: jsonschema.Version,
+		Version: "http://json-schema.org/draft-07/schema#",
 	}
 
 	// Generate a description from src comments (if available)
