@@ -1,8 +1,9 @@
 name: Build and Release
 
-on: 
+on:
   release:
-    types: [created]
+    types:
+    - created
 # on:
 #   push:
 #     branches: [ master ]
