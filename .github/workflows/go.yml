@@ -33,13 +33,13 @@ jobs:
     - name: Upload linux to release
       uses: JasonEtco/upload-to-release@v0.1.1
       with:
-        args: bin/protoc-gen-jsonschema-linux-amd64
+        args: bin/protoc-gen-jsonschema-linux-amd64 application/octet-stream
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         
     - name: Upload darwin to release
       uses: JasonEtco/upload-to-release@v0.1.1
       with:
-        args: bin/protoc-gen-jsonschema-darwin-amd64
+        args: bin/protoc-gen-jsonschema-darwin-amd64 application/octet-stream
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
