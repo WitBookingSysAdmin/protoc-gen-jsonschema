@@ -14,7 +14,7 @@ build_linux:
 	@GOOS=linux GOARCH=amd64 go build -o bin/protoc-gen-jsonschema-linux-amd64 cmd/protoc-gen-jsonschema/main.go
 
 build_darwin:
-	@echo "Generating darwin amd64 binary (protoc-gen-jsonschema-linux-amd64) ..."
+	@echo "Generating darwin amd64 binary (protoc-gen-jsonschema-darwin-amd64) ..."
 	@mkdir -p bin
 	@GOOS=darwin GOARCH=amd64 go build -o bin/protoc-gen-jsonschema-darwin-amd64 cmd/protoc-gen-jsonschema/main.go
 
