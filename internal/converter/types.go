@@ -140,15 +140,18 @@ func (c *Converter) convertField(curPkg *ProtoPackage, desc *descriptor.FieldDes
 			jsonSchemaType.Type = gojsonschema.TYPE_STRING
 			if stringRules := validationRules.GetString_(); stringRules != nil {
 				if constValue := stringRules.GetConst(); constValue != "" {
+					required = true
 					jsonSchemaType.Enum = []interface{}{constValue}
 				}
 				if min := stringRules.GetMinLen(); min != 0 {
+					required = true
 					jsonSchemaType.MinLength = int(min)
 				}
 				if max := stringRules.GetMaxLen(); max != 0 {
 					jsonSchemaType.MaxLength = int(max)
 				}
 				if len := stringRules.GetLen(); len > 0 {
+					required = true
 					jsonSchemaType.MinLength = int(len)
 					jsonSchemaType.MaxLength = int(len)
 				}
@@ -158,12 +161,15 @@ func (c *Converter) convertField(curPkg *ProtoPackage, desc *descriptor.FieldDes
 				//Prefix and suffix implemented via regexp.
 				//This means that you can't use prefix, suffix and regexp at the same time.
 				if prefix := stringRules.GetPrefix(); prefix != "" {
+					required = true
 					jsonSchemaType.Pattern = fmt.Sprintf("^%s.*", prefix)
 				}
 				if suffix := stringRules.GetSuffix(); suffix != "" {
+					required = true
 					jsonSchemaType.Pattern = fmt.Sprintf(".*%s$", suffix)
 				}
 				if in := stringRules.GetIn(); in != nil {
+					required = true
 					values := make([]interface{}, len(in))
 					for i := range in {
 						values[i] = in[i]
@@ -180,9 +186,11 @@ func (c *Converter) convertField(curPkg *ProtoPackage, desc *descriptor.FieldDes
 					}
 				}
 				if email := stringRules.GetEmail(); email {
+					required = true
 					jsonSchemaType.Format = "email"
 				}
 				if address := stringRules.GetAddress(); address {
+					required = true
 					jsonSchemaType.Type = ""
 					jsonSchemaType.OneOf = []*jsonschema.Type{
 						&jsonschema.Type{Type: gojsonschema.TYPE_STRING, Format: "ipv4"},
@@ -191,9 +199,11 @@ func (c *Converter) convertField(curPkg *ProtoPackage, desc *descriptor.FieldDes
 					}
 				}
 				if hostname := stringRules.GetHostname(); hostname {
+					required = true
 					jsonSchemaType.Format = "hostname"
 				}
 				if ip := stringRules.GetIp(); ip {
+					required = true
 					jsonSchemaType.Type = ""
 					jsonSchemaType.OneOf = []*jsonschema.Type{
 						&jsonschema.Type{Type: gojsonschema.TYPE_STRING, Format: "ipv4"},
@@ -201,18 +211,23 @@ func (c *Converter) convertField(curPkg *ProtoPackage, desc *descriptor.FieldDes
 					}
 				}
 				if ipv4 := stringRules.GetIpv4(); ipv4 {
+					required = true
 					jsonSchemaType.Format = "ipv4"
 				}
 				if ipv6 := stringRules.GetIpv6(); ipv6 {
+					required = true
 					jsonSchemaType.Format = "ipv6"
 				}
 				if uri := stringRules.GetUri(); uri {
+					required = true
 					jsonSchemaType.Format = "uri"
 				}
 				if uriRef := stringRules.GetUriRef(); uriRef {
+					required = true
 					jsonSchemaType.Format = "uri-reference"
 				}
 				if uuid := stringRules.GetUuid(); uuid {
+					required = true
 					jsonSchemaType.Format = "uuid"
 				}
 			}
