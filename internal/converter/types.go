@@ -169,7 +169,6 @@ func (c *Converter) convertField(curPkg *ProtoPackage, desc *descriptor.FieldDes
 					jsonSchemaType.Pattern = fmt.Sprintf(".*%s$", suffix)
 				}
 				if in := stringRules.GetIn(); in != nil {
-					required = true
 					values := make([]interface{}, len(in))
 					for i := range in {
 						values[i] = in[i]
