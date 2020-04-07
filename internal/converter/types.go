@@ -169,9 +169,11 @@ func (c *Converter) convertField(curPkg *ProtoPackage, desc *descriptor.FieldDes
 					jsonSchemaType.Pattern = fmt.Sprintf(".*%s$", suffix)
 				}
 				if in := stringRules.GetIn(); in != nil {
-					values := make([]interface{}, len(in))
+					values := []interface{}{}
 					for i := range in {
-						values[i] = in[i]
+						if in[i] != "" {
+							values = append(values, in[i])
+						}
 					}
 					jsonSchemaType.Enum = values
 				}
