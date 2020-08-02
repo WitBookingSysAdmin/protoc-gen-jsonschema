@@ -1,7 +1,15 @@
 package testdata
 
-const PayloadMessage = `{
+const PayloadMessage2 = `{
     "$schema": "http://json-schema.org/draft-04/schema#",
+    "required": [
+        "name",
+        "timestamp",
+        "id",
+        "rating",
+        "complete",
+        "topology"
+    ],
     "properties": {
         "name": {
             "type": "string"
