@@ -9,6 +9,7 @@ import (
 	"github.com/envoyproxy/protoc-gen-validate/validate"
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/protoc-gen-go/descriptor"
+	"github.com/iancoleman/orderedmap"
 	"github.com/xeipuuv/gojsonschema"
 )
 
@@ -18,6 +19,18 @@ var (
 		parent:   nil,
 		children: make(map[string]*ProtoPackage),
 		types:    make(map[string]*descriptor.DescriptorProto),
+	}
+
+	wellKnownTypes = map[string]bool{
+		"DoubleValue": true,
+		"FloatValue":  true,
+		"Int64Value":  true,
+		"UInt64Value": true,
+		"Int32Value":  true,
+		"UInt32Value": true,
+		"BoolValue":   true,
+		"StringValue": true,
+		"BytesValue":  true,
 	}
 )
 
@@ -62,7 +75,7 @@ componentLoop:
 }
 
 // Convert a proto "field" (essentially a type-switch with some recursion):
-func (c *Converter) convertField(curPkg *ProtoPackage, desc *descriptor.FieldDescriptorProto, msg *descriptor.DescriptorProto) (*jsonschema.Type, bool, error) {
+func (c *Converter) convertField(curPkg *ProtoPackage, desc *descriptor.FieldDescriptorProto, msg *descriptor.DescriptorProto, duplicatedMessages map[*descriptor.DescriptorProto]string) (*jsonschema.Type, bool, error) {
 	var validationRules *validate.FieldRules = nil
 	required := false
 	if desc.Options != nil {
@@ -78,11 +91,8 @@ func (c *Converter) convertField(curPkg *ProtoPackage, desc *descriptor.FieldDes
 	if validationRules != nil && validationRules.Message != nil && validationRules.Message.Required != nil {
 		required = *validationRules.Message.Required
 	}
-
 	// Prepare a new jsonschema.Type for our eventual return value:
-	jsonSchemaType := &jsonschema.Type{
-		Properties: make(map[string]*jsonschema.Type),
-	}
+	jsonSchemaType := &jsonschema.Type{}
 
 	// Generate a description from src comments (if available)
 	if src := c.sourceInfo.GetField(desc); src != nil {
@@ -268,14 +278,19 @@ func (c *Converter) convertField(curPkg *ProtoPackage, desc *descriptor.FieldDes
 			jsonSchemaType.Type = gojsonschema.TYPE_BOOLEAN
 		}
 
-	case descriptor.FieldDescriptorProto_TYPE_GROUP,
-		descriptor.FieldDescriptorProto_TYPE_MESSAGE:
-		jsonSchemaType.Type = gojsonschema.TYPE_OBJECT
-		if desc.GetLabel() == descriptor.FieldDescriptorProto_LABEL_OPTIONAL {
-			jsonSchemaType.AdditionalProperties = []byte("true")
-		}
-		if desc.GetLabel() == descriptor.FieldDescriptorProto_LABEL_REQUIRED {
-			jsonSchemaType.AdditionalProperties = []byte("false")
+	case descriptor.FieldDescriptorProto_TYPE_GROUP, descriptor.FieldDescriptorProto_TYPE_MESSAGE:
+		switch desc.GetTypeName() {
+		case ".google.protobuf.Timestamp":
+			jsonSchemaType.Type = gojsonschema.TYPE_STRING
+			jsonSchemaType.Format = "date-time"
+		default:
+			jsonSchemaType.Type = gojsonschema.TYPE_OBJECT
+			if desc.GetLabel() == descriptor.FieldDescriptorProto_LABEL_OPTIONAL {
+				jsonSchemaType.AdditionalProperties = []byte("true")
+			}
+			if desc.GetLabel() == descriptor.FieldDescriptorProto_LABEL_REQUIRED {
+				jsonSchemaType.AdditionalProperties = []byte("false")
+			}
 		}
 
 	default:
@@ -311,13 +326,13 @@ func (c *Converter) convertField(curPkg *ProtoPackage, desc *descriptor.FieldDes
 	// Recurse nested objects / arrays of objects (if necessary):
 	if jsonSchemaType.Type == gojsonschema.TYPE_OBJECT {
 
-		recordType, ok := c.lookupType(curPkg, desc.GetTypeName())
+		recordType, pkgName, ok := c.lookupType(curPkg, desc.GetTypeName())
 		if !ok {
 			return nil, required, fmt.Errorf("no such message type named %s", desc.GetTypeName())
 		}
 
 		// Recurse the recordType:
-		recursedJSONSchemaType, err := c.convertMessageType(curPkg, recordType)
+		recursedJSONSchemaType, err := c.recursiveConvertMessageType(curPkg, recordType, pkgName, duplicatedMessages, false)
 		if err != nil {
 			return nil, required, err
 		}
@@ -333,12 +348,13 @@ func (c *Converter) convertField(curPkg *ProtoPackage, desc *descriptor.FieldDes
 				Tracef("Is a map")
 
 			// Make sure we have a "value":
-			if _, ok := recursedJSONSchemaType.Properties["value"]; !ok {
+			value, valuePresent := recursedJSONSchemaType.Properties.Get("value")
+			if !valuePresent {
 				return nil, required, fmt.Errorf("Unable to find 'value' property of MAP type")
 			}
 
 			// Marshal the "value" properties to JSON (because that's how we can pass on AdditionalProperties):
-			additionalPropertiesJSON, err := json.Marshal(recursedJSONSchemaType.Properties["value"])
+			additionalPropertiesJSON, err := json.Marshal(value)
 			if err != nil {
 				return nil, required, err
 			}
@@ -346,12 +362,32 @@ func (c *Converter) convertField(curPkg *ProtoPackage, desc *descriptor.FieldDes
 
 		// Arrays:
 		case desc.GetLabel() == descriptor.FieldDescriptorProto_LABEL_REPEATED:
-			jsonSchemaType.Items = &recursedJSONSchemaType
+			jsonSchemaType.Items = recursedJSONSchemaType
 			jsonSchemaType.Type = gojsonschema.TYPE_ARRAY
+
+			// Build up the list of required fields:
+			if c.AllFieldsRequired {
+				for _, property := range recursedJSONSchemaType.Properties.Keys() {
+					jsonSchemaType.Items.Required = append(jsonSchemaType.Items.Required, property)
+				}
+			}
 
 		// Objects:
 		default:
+			if recursedJSONSchemaType.OneOf != nil {
+				return recursedJSONSchemaType, required, nil
+			}
+
 			jsonSchemaType.Properties = recursedJSONSchemaType.Properties
+			jsonSchemaType.Ref = recursedJSONSchemaType.Ref
+			jsonSchemaType.Required = recursedJSONSchemaType.Required
+
+			// Build up the list of required fields:
+			if c.AllFieldsRequired {
+				for _, property := range recursedJSONSchemaType.Properties.Keys() {
+					jsonSchemaType.Required = append(jsonSchemaType.Required, property)
+				}
+			}
 		}
 
 		// Optionally allow NULL values:
@@ -364,17 +400,154 @@ func (c *Converter) convertField(curPkg *ProtoPackage, desc *descriptor.FieldDes
 		}
 	}
 
+	jsonSchemaType.Required = dedupe(jsonSchemaType.Required)
+
 	return jsonSchemaType, required, nil
 }
 
 // Converts a proto "MESSAGE" into a JSON-Schema:
-func (c *Converter) convertMessageType(curPkg *ProtoPackage, msg *descriptor.DescriptorProto) (jsonschema.Type, error) {
+func (c *Converter) convertMessageType(curPkg *ProtoPackage, msg *descriptor.DescriptorProto) (*jsonschema.Schema, error) {
+
+	// first, recursively find messages that appear more than once - in particular, that will break cycles
+	duplicatedMessages, err := c.findDuplicatedNestedMessages(curPkg, msg)
+	if err != nil {
+		return nil, err
+	}
+
+	// main schema for the message
+	rootType, err := c.recursiveConvertMessageType(curPkg, msg, "", duplicatedMessages, false)
+	if err != nil {
+		return nil, err
+	}
+
+	// and then generate the sub-schema for each duplicated message
+	definitions := jsonschema.Definitions{}
+	for refMsg, name := range duplicatedMessages {
+		refType, err := c.recursiveConvertMessageType(curPkg, refMsg, "", duplicatedMessages, true)
+		if err != nil {
+			return nil, err
+		}
+
+		// need to give that schema an ID
+		if refType.Extras == nil {
+			refType.Extras = make(map[string]interface{})
+		}
+		refType.Extras["id"] = name
+		definitions[name] = refType
+	}
+
+	newJSONSchema := &jsonschema.Schema{
+		Type:        rootType,
+		Definitions: definitions,
+	}
+
+	// Look for required fields (either by proto2 required flag, or the AllFieldsRequired option):
+	for _, fieldDesc := range msg.GetField() {
+		if c.AllFieldsRequired || fieldDesc.GetLabel() == descriptor.FieldDescriptorProto_LABEL_REQUIRED {
+			newJSONSchema.Required = append(newJSONSchema.Required, fieldDesc.GetName())
+		}
+	}
+
+	newJSONSchema.Required = dedupe(newJSONSchema.Required)
+
+	return newJSONSchema, nil
+}
+
+// findDuplicatedNestedMessages takes a message, and returns a map mapping pointers to messages that appear more than once
+// (typically because they're part of a reference cycle) to the sub-schema name that we give them.
+func (c *Converter) findDuplicatedNestedMessages(curPkg *ProtoPackage, msg *descriptor.DescriptorProto) (map[*descriptor.DescriptorProto]string, error) {
+	all := make(map[*descriptor.DescriptorProto]*nameAndCounter)
+	if err := c.recursiveFindDuplicatedNestedMessages(curPkg, msg, msg.GetName(), all); err != nil {
+		return nil, err
+	}
+
+	result := make(map[*descriptor.DescriptorProto]string)
+	for m, nameAndCounter := range all {
+		if nameAndCounter.counter > 1 && !strings.HasPrefix(nameAndCounter.name, ".google.protobuf.") {
+			result[m] = strings.TrimLeft(nameAndCounter.name, ".")
+		}
+	}
+
+	return result, nil
+}
+
+type nameAndCounter struct {
+	name    string
+	counter int
+}
+
+func (c *Converter) recursiveFindDuplicatedNestedMessages(curPkg *ProtoPackage, msg *descriptor.DescriptorProto, typeName string, alreadySeen map[*descriptor.DescriptorProto]*nameAndCounter) error {
+	if nameAndCounter, present := alreadySeen[msg]; present {
+		nameAndCounter.counter++
+		return nil
+	}
+	alreadySeen[msg] = &nameAndCounter{
+		name:    typeName,
+		counter: 1,
+	}
+
+	for _, desc := range msg.GetField() {
+		descType := desc.GetType()
+		if descType != descriptor.FieldDescriptorProto_TYPE_MESSAGE && descType != descriptor.FieldDescriptorProto_TYPE_GROUP {
+			// no nested messages
+			continue
+		}
+
+		typeName := desc.GetTypeName()
+		recordType, _, ok := c.lookupType(curPkg, typeName)
+		if !ok {
+			return fmt.Errorf("no such message type named %s", typeName)
+		}
+		if err := c.recursiveFindDuplicatedNestedMessages(curPkg, recordType, typeName, alreadySeen); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (c *Converter) recursiveConvertMessageType(curPkg *ProtoPackage, msg *descriptor.DescriptorProto, pkgName string, duplicatedMessages map[*descriptor.DescriptorProto]string, ignoreDuplicatedMessages bool) (*jsonschema.Type, error) {
+	if msg.Name != nil && wellKnownTypes[*msg.Name] && pkgName == ".google.protobuf" {
+		schema := &jsonschema.Type{}
+		schema.Type = ""
+		switch *msg.Name {
+		case "DoubleValue", "FloatValue":
+			schema.OneOf = []*jsonschema.Type{
+				{Type: gojsonschema.TYPE_NULL},
+				{Type: gojsonschema.TYPE_NUMBER},
+			}
+		case "Int32Value", "UInt32Value", "Int64Value", "UInt64Value":
+			schema.OneOf = []*jsonschema.Type{
+				{Type: gojsonschema.TYPE_NULL},
+				{Type: gojsonschema.TYPE_INTEGER},
+			}
+		case "BoolValue":
+			schema.OneOf = []*jsonschema.Type{
+				{Type: gojsonschema.TYPE_NULL},
+				{Type: gojsonschema.TYPE_BOOLEAN},
+			}
+		case "BytesValue", "StringValue":
+			schema.OneOf = []*jsonschema.Type{
+				{Type: gojsonschema.TYPE_NULL},
+				{Type: gojsonschema.TYPE_STRING},
+			}
+		}
+		return schema, nil
+	}
+
+	if refName, ok := duplicatedMessages[msg]; ok && !ignoreDuplicatedMessages {
+		return &jsonschema.Type{
+			Version: jsonschema.Version,
+			Ref:     refName,
+		}, nil
+	}
 
 	// Prepare a new jsonschema:
-	jsonSchemaType := jsonschema.Type{
-		Properties: make(map[string]*jsonschema.Type),
-		Version:    "http://json-schema.org/draft-07/schema#",
+	jsonSchemaType := &jsonschema.Type{
+		Properties: orderedmap.New(),
+		Version:    jsonschema.Version,
 	}
+
 	// Generate a description from src comments (if available)
 	if src := c.sourceInfo.GetMessage(msg); src != nil {
 		jsonSchemaType.Description = formatDescription(src)
@@ -399,17 +572,32 @@ func (c *Converter) convertMessageType(curPkg *ProtoPackage, msg *descriptor.Des
 
 	c.logger.WithField("message_str", proto.MarshalTextString(msg)).Trace("Converting message")
 	for _, fieldDesc := range msg.GetField() {
-		recursedJSONSchemaType, required, err := c.convertField(curPkg, fieldDesc, msg)
-		c.logger.WithField("field_name", fieldDesc.GetName()).WithField("type", recursedJSONSchemaType.Type).Debug("Converted field")
+		recursedJSONSchemaType, required, err := c.convertField(curPkg, fieldDesc, msg, duplicatedMessages)
 		if err != nil {
 			c.logger.WithError(err).WithField("field_name", fieldDesc.GetName()).WithField("message_name", msg.GetName()).Error("Failed to convert field")
-			return jsonSchemaType, err
+			return nil, err
 		}
-		jsonSchemaType.Properties[fieldDesc.GetJsonName()] = recursedJSONSchemaType
+		c.logger.WithField("field_name", fieldDesc.GetName()).WithField("type", recursedJSONSchemaType.Type).Trace("Converted field")
+		jsonSchemaType.Properties.Set(fieldDesc.GetName(), recursedJSONSchemaType)
+		if c.UseProtoAndJSONFieldnames && fieldDesc.GetName() != fieldDesc.GetJsonName() {
+			jsonSchemaType.Properties.Set(fieldDesc.GetJsonName(), recursedJSONSchemaType)
+		}
+
+		// Look for required fields (either by proto2 required flag, or the AllFieldsRequired option):
+		if fieldDesc.GetLabel() == descriptor.FieldDescriptorProto_LABEL_REQUIRED {
+			jsonSchemaType.Required = append(jsonSchemaType.Required, fieldDesc.GetName())
+		}
+
 		if required {
 			jsonSchemaType.Required = append(jsonSchemaType.Required, fieldDesc.GetJsonName())
 		}
 	}
+
+	// Remove empty properties to keep the final output as clean as possible:
+	if len(jsonSchemaType.Properties.Keys()) == 0 {
+		jsonSchemaType.Properties = nil
+	}
+
 	return jsonSchemaType, nil
 }
 
@@ -427,4 +615,17 @@ func formatDescription(sl *descriptor.SourceCodeInfo_Location) string {
 		lines = append(lines, s)
 	}
 	return strings.Join(lines, "\n\n")
+}
+
+func dedupe(inputStrings []string) []string {
+	appended := make(map[string]bool)
+	outputStrings := []string{}
+
+	for _, inputString := range inputStrings {
+		if !appended[inputString] {
+			outputStrings = append(outputStrings, inputString)
+			appended[inputString] = true
+		}
+	}
+	return outputStrings
 }

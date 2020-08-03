@@ -1,9 +1,16 @@
 package testdata
 
-const NestedMessage = `{
+const Proto2NestedMessage = `{
     "$schema": "http://json-schema.org/draft-04/schema#",
+    "required": [
+        "payload"
+    ],
     "properties": {
         "payload": {
+            "required": [
+                "name",
+                "id"
+            ],
             "properties": {
                 "name": {
                     "type": "string"
@@ -45,7 +52,7 @@ const NestedMessage = `{
                     ]
                 }
             },
-            "additionalProperties": true,
+            "additionalProperties": false,
             "type": "object"
         },
         "description": {

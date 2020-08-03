@@ -1,7 +1,13 @@
-package testdata
-
-const PayloadMessage = `{
+{
     "$schema": "http://json-schema.org/draft-04/schema#",
+    "required": [
+        "name",
+        "timestamp",
+        "id",
+        "rating",
+        "complete",
+        "topology"
+    ],
     "properties": {
         "name": {
             "type": "string"
@@ -45,4 +51,4 @@ const PayloadMessage = `{
     },
     "additionalProperties": true,
     "type": "object"
-}`
+}

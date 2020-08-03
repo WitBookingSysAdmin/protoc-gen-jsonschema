@@ -1,22 +1,21 @@
-{
+package testdata
+
+const Proto2Required = `{
     "$schema": "http://json-schema.org/draft-04/schema#",
+    "required": [
+        "query"
+    ],
     "properties": {
-        "name1": {
+        "query": {
             "type": "string"
         },
-        "timestamp1": {
-            "type": "string"
-        },
-        "id1": {
+        "page_number": {
             "type": "integer"
         },
-        "rating1": {
-            "type": "number"
-        },
-        "complete1": {
-            "type": "boolean"
+        "result_per_page": {
+            "type": "integer"
         }
     },
     "additionalProperties": true,
     "type": "object"
-}
+}`
