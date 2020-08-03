@@ -222,7 +222,7 @@ func (c *Converter) convert(req *plugin.CodeGeneratorRequest) (*plugin.CodeGener
 
 func (c *Converter) generateSchemaFilename(file *descriptor.FileDescriptorProto, protoName string) string {
 	if c.PrefixSchemaFilesWithPackage {
-		return (fmt.Sprintf("%s/%s.jsonschema", file.GetPackage(), protoName))
+		return (fmt.Sprintf("%s/%s.json", file.GetPackage(), protoName))
 	}
-	return (fmt.Sprintf("%s.jsonschema", protoName))
+	return (fmt.Sprintf("%s.json", protoName))
 }
