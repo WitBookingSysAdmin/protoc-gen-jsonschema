@@ -14,7 +14,8 @@ import (
 )
 
 var (
-	globalPkg = &ProtoPackage{
+	schemaVersion = "http://json-schema.org/draft-07/schema#"
+	globalPkg     = &ProtoPackage{
 		name:     "",
 		parent:   nil,
 		children: make(map[string]*ProtoPackage),
@@ -508,7 +509,9 @@ func (c *Converter) recursiveFindDuplicatedNestedMessages(curPkg *ProtoPackage, 
 
 func (c *Converter) recursiveConvertMessageType(curPkg *ProtoPackage, msg *descriptor.DescriptorProto, pkgName string, duplicatedMessages map[*descriptor.DescriptorProto]string, ignoreDuplicatedMessages bool) (*jsonschema.Type, error) {
 	if msg.Name != nil && wellKnownTypes[*msg.Name] && pkgName == ".google.protobuf" {
-		schema := &jsonschema.Type{}
+		schema := &jsonschema.Type{
+			Version: schemaVersion,
+		}
 		schema.Type = ""
 		switch *msg.Name {
 		case "DoubleValue", "FloatValue":
@@ -537,7 +540,7 @@ func (c *Converter) recursiveConvertMessageType(curPkg *ProtoPackage, msg *descr
 
 	if refName, ok := duplicatedMessages[msg]; ok && !ignoreDuplicatedMessages {
 		return &jsonschema.Type{
-			Version: jsonschema.Version,
+			Version: schemaVersion,
 			Ref:     refName,
 		}, nil
 	}
@@ -545,7 +548,7 @@ func (c *Converter) recursiveConvertMessageType(curPkg *ProtoPackage, msg *descr
 	// Prepare a new jsonschema:
 	jsonSchemaType := &jsonschema.Type{
 		Properties: orderedmap.New(),
-		Version:    jsonschema.Version,
+		Version:    schemaVersion,
 	}
 
 	// Generate a description from src comments (if available)
